@@ -1,0 +1,7 @@
+secrets.yaml
+.esphome
+uh50-reader
+__pycache__/
+*.pyc
+tests/cpp/build/
+*.yaml
