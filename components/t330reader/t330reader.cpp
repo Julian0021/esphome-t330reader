@@ -54,7 +54,13 @@ static bool is_valid_long_frame_packet(const std::vector<uint8_t> &packet) {
 static bool is_seq3_confirmation_packet(const std::vector<uint8_t> &packet) {
   // Expected response to sequence 3:
   // 68 05 05 68 08 00 78 0F 00 CHK 16
+  // Fallback 11 bit check in case of noise
+
   if (!is_valid_long_frame_packet(packet)) {
+    if (packet.size() == 11 && packet[0] == 0x68 && packet[1] == 0x05 &&
+        packet[2] == 0x05 && packet[3] == 0x68) {
+      return true;
+    }
     return false;
   }
   if (packet.size() != 11 || packet[1] != 0x05) {
@@ -63,7 +69,12 @@ static bool is_seq3_confirmation_packet(const std::vector<uint8_t> &packet) {
   if ((packet[4] & 0x0F) != 0x08) {
     return false;
   }
-  return packet[6] == 0x78;
+  if (packet[6] == 0x78) {
+    return true;
+  }
+
+  return packet[0] == 0x68 && packet[1] == 0x05 && packet[2] == 0x05 &&
+         packet[3] == 0x68;
 }
 
 void T330Reader::setup() {
@@ -202,13 +213,13 @@ bool T330Reader::read_packet_(std::vector<uint8_t> &packet,
       continue;
     }
 
-    packet.push_back(first);
-
     if (first == 0xE5) {
+      packet.push_back(first);
       return true;
     }
 
     if (first == 0x10) {
+      packet.push_back(first);
       std::vector<uint8_t> rest;
       if (!this->read_exact_(rest, 4, timeout_ms)) {
         return false;
@@ -218,6 +229,7 @@ bool T330Reader::read_packet_(std::vector<uint8_t> &packet,
     }
 
     if (first == 0x68) {
+      packet.push_back(first);
       std::vector<uint8_t> header_rest;
       if (!this->read_exact_(header_rest, 3, timeout_ms)) {
         return false;
@@ -246,16 +258,9 @@ bool T330Reader::read_packet_(std::vector<uint8_t> &packet,
       return true;
     }
 
-    while ((millis() - started_at) <= 20 && packet.size() < MAX_PACKET_SIZE) {
-      uint8_t value = 0;
-      if (!this->read_byte(&value)) {
-        delay(1);
-        continue;
-      }
-      packet.push_back(value);
-      started_at = millis();
-    }
-    return true;
+    // Keep searching for a valid frame start marker. Treat unexpected leading
+    // bytes as line noise so we don't swallow a following valid long frame.
+    continue;
   }
 
   return false;
