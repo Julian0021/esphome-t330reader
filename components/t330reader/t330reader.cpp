@@ -32,6 +32,40 @@ static const uint8_t SEQ_SWITCH_9600[] = {
     0x10, 0x7C, 0xFE, 0x7A, 0x16,
 };
 
+static bool is_valid_long_frame_packet(const std::vector<uint8_t> &packet) {
+  if (packet.size() < 6 || packet[0] != 0x68) {
+    return false;
+  }
+  if (packet[1] != packet[2] || packet[3] != 0x68) {
+    return false;
+  }
+  const size_t expected_size = static_cast<size_t>(packet[1]) + 6U;
+  if (packet.size() != expected_size) {
+    return false;
+  }
+
+  uint8_t checksum = 0;
+  for (size_t i = 4; i < (4U + packet[1]); i++) {
+    checksum = static_cast<uint8_t>(checksum + packet[i]);
+  }
+  return checksum == packet[4 + packet[1]] && packet[5 + packet[1]] == 0x16;
+}
+
+static bool is_seq3_confirmation_packet(const std::vector<uint8_t> &packet) {
+  // Expected response to sequence 3:
+  // 68 05 05 68 08 00 78 0F 00 CHK 16
+  if (!is_valid_long_frame_packet(packet)) {
+    return false;
+  }
+  if (packet.size() != 11 || packet[1] != 0x05) {
+    return false;
+  }
+  if ((packet[4] & 0x0F) != 0x08) {
+    return false;
+  }
+  return packet[6] == 0x78;
+}
+
 void T330Reader::setup() {
   if (this->uart_out_ == nullptr) {
     ESP_LOGE(TAG, "No output UART configured");
@@ -235,6 +269,7 @@ bool T330Reader::perform_handshake_(std::string &version_string) {
   version_string.clear();
 
   for (int attempt = 0; attempt <= SEQ1_RETRIES_AFTER_FIRST; attempt++) {
+    this->clear_input_buffer_();
     this->send_command_(SEQ_READ_VERSION, sizeof(SEQ_READ_VERSION));
 
     std::vector<uint8_t> packet;
@@ -284,6 +319,7 @@ bool T330Reader::perform_handshake_(std::string &version_string) {
 
   bool reset_ack = false;
   for (int attempt = 0; attempt <= SEQ2_RETRIES_AFTER_FIRST; attempt++) {
+    this->clear_input_buffer_();
     this->send_command_(SEQ_APP_RESET, sizeof(SEQ_APP_RESET));
 
     std::vector<uint8_t> packet;
@@ -303,13 +339,14 @@ bool T330Reader::perform_handshake_(std::string &version_string) {
 
   bool seq3_ok = false;
   for (int attempt = 0; attempt <= SEQ3_RETRIES_AFTER_FIRST; attempt++) {
+    this->clear_input_buffer_();
     this->send_command_(SEQ_REQ_78, sizeof(SEQ_REQ_78));
 
     std::vector<uint8_t> packet;
     if (!this->read_packet_(packet, COMMAND_TIMEOUT_MS)) {
       continue;
     }
-    if (std::find(packet.begin(), packet.end(), 0x78) != packet.end()) {
+    if (is_seq3_confirmation_packet(packet)) {
       seq3_ok = true;
       break;
     }
@@ -320,6 +357,7 @@ bool T330Reader::perform_handshake_(std::string &version_string) {
     return false;
   }
 
+  this->clear_input_buffer_();
   this->send_command_(SEQ_SWITCH_9600, sizeof(SEQ_SWITCH_9600));
   return true;
 }
@@ -328,21 +366,30 @@ bool T330Reader::read_all_data_packets_(
     std::vector<std::vector<uint8_t>> &packets) {
   packets.clear();
 
-  bool first_packet_received = false;
-  for (int attempt = 0;
-       attempt <= DATA_FIRST_PACKET_RETRIES_AFTER_FIRST; attempt++) {
+  const uint32_t first_window_ms =
+      DATA_FIRST_PACKET_TIMEOUT_MS *
+      static_cast<uint32_t>(DATA_FIRST_PACKET_RETRIES_AFTER_FIRST + 1);
+  const uint32_t first_window_started = millis();
+
+  while ((millis() - first_window_started) <= first_window_ms) {
     std::vector<uint8_t> packet;
     if (!this->read_packet_(packet, DATA_FIRST_PACKET_TIMEOUT_MS)) {
       continue;
     }
     if (!packet.empty() && packet[0] == 0x68) {
       packets.push_back(packet);
-      first_packet_received = true;
+      ESP_LOGV(TAG, "Received first T330 long frame (%u bytes)",
+               static_cast<unsigned>(packet.size()));
       break;
     }
+    ESP_LOGV(TAG,
+             "Ignoring non-data packet while waiting first T330 data frame "
+             "(first=0x%02X, size=%u)",
+             static_cast<unsigned>(packet.empty() ? 0 : packet[0]),
+             static_cast<unsigned>(packet.size()));
   }
 
-  if (!first_packet_received) {
+  if (packets.empty()) {
     return false;
   }
 
