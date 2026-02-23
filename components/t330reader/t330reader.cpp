@@ -77,6 +77,46 @@ static bool is_seq3_confirmation_packet(const std::vector<uint8_t> &packet) {
          packet[3] == 0x68;
 }
 
+static std::string bytes_to_hex_string_(const uint8_t *data, size_t len) {
+  std::string text;
+  if (len == 0) {
+    return text;
+  }
+
+  text.reserve(len * 3U);
+  char byte_hex[4];
+  for (size_t i = 0; i < len; i++) {
+    std::snprintf(byte_hex, sizeof(byte_hex), "%02X", data[i]);
+    text.append(byte_hex);
+    if (i + 1U < len) {
+      text.push_back(' ');
+    }
+  }
+  return text;
+}
+
+static void log_bytes_verbose_(const char *context,
+                               const uint8_t *data,
+                               size_t len) {
+  if (len == 0) {
+    ESP_LOGV(TAG, "%s: <empty>", context);
+    return;
+  }
+
+  static const size_t BYTES_PER_LINE = 32;
+  for (size_t offset = 0; offset < len; offset += BYTES_PER_LINE) {
+    const size_t count = std::min(BYTES_PER_LINE, len - offset);
+    const std::string hex = bytes_to_hex_string_(data + offset, count);
+    ESP_LOGV(TAG, "%s [%u..%u]: %s", context, static_cast<unsigned>(offset),
+             static_cast<unsigned>(offset + count - 1U), hex.c_str());
+  }
+}
+
+static void log_packet_verbose_(const char *context,
+                                const std::vector<uint8_t> &packet) {
+  log_bytes_verbose_(context, packet.data(), packet.size());
+}
+
 void T330Reader::setup() {
   if (this->uart_out_ == nullptr) {
     ESP_LOGE(TAG, "No output UART configured");
@@ -143,9 +183,27 @@ void T330Reader::dump_config() {
 }
 
 void T330Reader::clear_input_buffer_() {
+  static const size_t LOG_CAPTURE_LIMIT = 256;
+  std::vector<uint8_t> captured;
+  captured.reserve(LOG_CAPTURE_LIMIT);
+  size_t total = 0;
+
   uint8_t byte;
   while (this->read_byte(&byte)) {
-    // consume stale UART bytes
+    if (captured.size() < LOG_CAPTURE_LIMIT) {
+      captured.push_back(byte);
+    }
+    total++;
+  }
+
+  if (total > 0) {
+    ESP_LOGD(TAG, "Cleared %u stale UART byte(s) from input buffer",
+             static_cast<unsigned>(total));
+    log_packet_verbose_("Cleared UART bytes", captured);
+    if (total > captured.size()) {
+      ESP_LOGV(TAG, "Cleared UART bytes logging truncated (%u additional byte(s))",
+               static_cast<unsigned>(total - captured.size()));
+    }
   }
 }
 
@@ -215,6 +273,8 @@ bool T330Reader::read_packet_(std::vector<uint8_t> &packet,
 
     if (first == 0xE5) {
       packet.push_back(first);
+      ESP_LOGD(TAG, "read_packet_: received ACK frame");
+      log_packet_verbose_("read_packet_ raw RX", packet);
       return true;
     }
 
@@ -222,9 +282,17 @@ bool T330Reader::read_packet_(std::vector<uint8_t> &packet,
       packet.push_back(first);
       std::vector<uint8_t> rest;
       if (!this->read_exact_(rest, 4, timeout_ms)) {
+        ESP_LOGD(TAG,
+                 "read_packet_: short frame start received but timed out while "
+                 "reading remainder (%u ms timeout)",
+                 static_cast<unsigned>(timeout_ms));
+        log_packet_verbose_("read_packet_ partial RX", packet);
         return false;
       }
       packet.insert(packet.end(), rest.begin(), rest.end());
+      ESP_LOGD(TAG, "read_packet_: received short frame (%u bytes)",
+               static_cast<unsigned>(packet.size()));
+      log_packet_verbose_("read_packet_ raw RX", packet);
       return true;
     }
 
@@ -232,6 +300,11 @@ bool T330Reader::read_packet_(std::vector<uint8_t> &packet,
       packet.push_back(first);
       std::vector<uint8_t> header_rest;
       if (!this->read_exact_(header_rest, 3, timeout_ms)) {
+        ESP_LOGD(TAG,
+                 "read_packet_: long frame start received but timed out while "
+                 "reading header (%u ms timeout)",
+                 static_cast<unsigned>(timeout_ms));
+        log_packet_verbose_("read_packet_ partial RX", packet);
         return false;
       }
       packet.insert(packet.end(), header_rest.begin(), header_rest.end());
@@ -241,28 +314,45 @@ bool T330Reader::read_packet_(std::vector<uint8_t> &packet,
       const uint8_t frame_marker = header_rest[2];
       if (len_1 != len_2 || frame_marker != 0x68) {
         ESP_LOGW(TAG, "Invalid long frame header");
+        log_packet_verbose_("read_packet_ invalid header bytes", packet);
         return false;
       }
 
       if ((static_cast<size_t>(len_1) + 6U) > MAX_PACKET_SIZE) {
         ESP_LOGW(TAG, "Frame too large: %u", static_cast<unsigned>(len_1));
+        log_packet_verbose_("read_packet_ oversized header bytes", packet);
         return false;
       }
 
       std::vector<uint8_t> body_and_tail;
       if (!this->read_exact_(body_and_tail,
                              static_cast<size_t>(len_1) + 2U, timeout_ms)) {
+        ESP_LOGD(TAG,
+                 "read_packet_: long frame header read but timed out while "
+                 "reading body/tail (L=%u, timeout=%u ms)",
+                 static_cast<unsigned>(len_1),
+                 static_cast<unsigned>(timeout_ms));
+        log_packet_verbose_("read_packet_ partial RX", packet);
         return false;
       }
       packet.insert(packet.end(), body_and_tail.begin(), body_and_tail.end());
+      ESP_LOGD(TAG, "read_packet_: received long frame (%u bytes)",
+               static_cast<unsigned>(packet.size()));
+      log_packet_verbose_("read_packet_ raw RX", packet);
       return true;
     }
 
     // Keep searching for a valid frame start marker. Treat unexpected leading
     // bytes as line noise so we don't swallow a following valid long frame.
+    ESP_LOGV(TAG,
+             "read_packet_: skipping non-frame byte 0x%02X while waiting for "
+             "frame start",
+             static_cast<unsigned>(first));
     continue;
   }
 
+  ESP_LOGD(TAG, "read_packet_: timeout after %u ms with no complete frame",
+           static_cast<unsigned>(timeout_ms));
   return false;
 }
 
@@ -375,19 +465,41 @@ bool T330Reader::read_all_data_packets_(
       DATA_FIRST_PACKET_TIMEOUT_MS *
       static_cast<uint32_t>(DATA_FIRST_PACKET_RETRIES_AFTER_FIRST + 1);
   const uint32_t first_window_started = millis();
+  unsigned first_attempt = 0;
+
+  ESP_LOGD(TAG,
+           "Starting data retrieval window: first packet timeout=%u ms, "
+           "window=%u ms (max retries=%u)",
+           static_cast<unsigned>(DATA_FIRST_PACKET_TIMEOUT_MS),
+           static_cast<unsigned>(first_window_ms),
+           static_cast<unsigned>(DATA_FIRST_PACKET_RETRIES_AFTER_FIRST + 1));
 
   while ((millis() - first_window_started) <= first_window_ms) {
+    first_attempt++;
     std::vector<uint8_t> packet;
     if (!this->read_packet_(packet, DATA_FIRST_PACKET_TIMEOUT_MS)) {
+      const uint32_t elapsed = millis() - first_window_started;
+      const uint32_t remaining =
+          elapsed < first_window_ms ? (first_window_ms - elapsed) : 0;
+      ESP_LOGD(TAG,
+               "First data packet attempt %u: no complete frame (elapsed=%u ms, "
+               "remaining window=%u ms)",
+               first_attempt, static_cast<unsigned>(elapsed),
+               static_cast<unsigned>(remaining));
       continue;
     }
+
+    ESP_LOGD(TAG, "First data packet attempt %u: received %u byte(s)",
+             first_attempt, static_cast<unsigned>(packet.size()));
+    log_packet_verbose_("Data-window raw RX", packet);
+
     if (!packet.empty() && packet[0] == 0x68) {
       packets.push_back(packet);
-      ESP_LOGV(TAG, "Received first T330 long frame (%u bytes)",
+      ESP_LOGD(TAG, "Accepted first T330 long frame (%u bytes)",
                static_cast<unsigned>(packet.size()));
       break;
     }
-    ESP_LOGV(TAG,
+    ESP_LOGD(TAG,
              "Ignoring non-data packet while waiting first T330 data frame "
              "(first=0x%02X, size=%u)",
              static_cast<unsigned>(packet.empty() ? 0 : packet[0]),
@@ -395,19 +507,43 @@ bool T330Reader::read_all_data_packets_(
   }
 
   if (packets.empty()) {
+    ESP_LOGD(TAG,
+             "Data retrieval failed: no first long frame received within %u ms "
+             "window",
+             static_cast<unsigned>(first_window_ms));
     return false;
   }
 
   for (size_t i = 0; i < 255; i++) {
     std::vector<uint8_t> packet;
     if (!this->read_packet_(packet, DATA_NEXT_PACKET_TIMEOUT_MS)) {
+      ESP_LOGD(TAG,
+               "No more data packets after %u captured packet(s); next packet "
+               "timed out (%u ms)",
+               static_cast<unsigned>(packets.size()),
+               static_cast<unsigned>(DATA_NEXT_PACKET_TIMEOUT_MS));
       break;
     }
+
+    ESP_LOGD(TAG, "Follow-up packet %u received (%u bytes)",
+             static_cast<unsigned>(i + 1U),
+             static_cast<unsigned>(packet.size()));
+    log_packet_verbose_("Data-follow-up raw RX", packet);
+
     if (!packet.empty() && packet[0] == 0x68) {
       packets.push_back(packet);
+      ESP_LOGD(TAG, "Accepted follow-up long frame %u",
+               static_cast<unsigned>(packets.size()));
+    } else {
+      ESP_LOGD(TAG,
+               "Ignoring non-long follow-up packet (first=0x%02X, size=%u)",
+               static_cast<unsigned>(packet.empty() ? 0 : packet[0]),
+               static_cast<unsigned>(packet.size()));
     }
   }
 
+  ESP_LOGD(TAG, "Data retrieval complete: captured %u long frame(s)",
+           static_cast<unsigned>(packets.size()));
   return !packets.empty();
 }
 
@@ -1014,16 +1150,24 @@ void T330Reader::read_meter_() {
            version_string.c_str());
   this->publish_text_(this->version_string_sensor_, version_string);
 
+  ESP_LOGD(TAG,
+           "Entering data phase: waiting %u ms before switching input UART to "
+           "9600 baud",
+           static_cast<unsigned>(POST_SWITCH_SETTLE_MS));
   delay(POST_SWITCH_SETTLE_MS);
   if (!this->set_input_baud_(9600)) {
     this->publish_error_status_(ErrorStatus::INPUT_BAUD_9600_FAILED);
     this->set_input_baud_(2400);
     return;
   }
+  ESP_LOGD(TAG, "Input UART switched to 9600; starting data packet read");
 
   std::vector<std::vector<uint8_t>> packets;
   if (!this->read_all_data_packets_(packets)) {
     ESP_LOGW(TAG, "No T330 data packets received");
+    ESP_LOGD(TAG,
+             "Publishing error_status=4 (NO_DATA_PACKETS): data retrieval "
+             "window completed without accepted long frame");
     this->publish_error_status_(ErrorStatus::NO_DATA_PACKETS);
     this->set_input_baud_(2400);
     return;
