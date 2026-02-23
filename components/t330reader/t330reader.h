@@ -131,6 +131,10 @@ class T330Reader : public PollingComponent,
   void read_meter_();
   bool perform_handshake_(std::string &version_string);
   bool read_all_data_packets_(std::vector<std::vector<uint8_t>> &packets);
+  bool capture_data_stream_(std::vector<uint8_t> &stream);
+  void extract_long_frames_from_stream_(
+      const std::vector<uint8_t> &stream,
+      std::vector<std::vector<uint8_t>> &packets);
 
   void send_command_(const uint8_t *frame, size_t frame_len);
   bool read_packet_(std::vector<uint8_t> &packet, uint32_t timeout_ms);
@@ -191,14 +195,14 @@ class T330Reader : public PollingComponent,
 
   static const size_t PREAMBLE_ZERO_COUNT = 240;
   static const uint32_t COMMAND_TIMEOUT_MS = 1500;
-  static const uint32_t DATA_FIRST_PACKET_TIMEOUT_MS = 2000;
-  static const uint32_t DATA_NEXT_PACKET_TIMEOUT_MS = 2000;
-  static const uint32_t POST_SWITCH_SETTLE_MS = 1500;
+  static const uint32_t DATA_CAPTURE_WINDOW_MS = 6000;
+  static const uint32_t DATA_CAPTURE_IDLE_TIMEOUT_MS = 300;
+  static const uint32_t POST_SWITCH_SETTLE_MS = 200;
   static const int SEQ1_RETRIES_AFTER_FIRST = 10;
   static const int SEQ2_RETRIES_AFTER_FIRST = 5;
   static const int SEQ3_RETRIES_AFTER_FIRST = 2;
-  static const int DATA_FIRST_PACKET_RETRIES_AFTER_FIRST = 4;
   static const size_t MAX_PACKET_SIZE = 2048;
+  static const size_t MAX_CAPTURE_BYTES = 8192;
 };
 
 }  // namespace t330reader
