@@ -62,7 +62,7 @@ CONF_MAX_RETURN_TEMPERATURE_DATETIME = "max_return_temperature_datetime"
 NUMERIC_SENSORS = {
     CONF_ENERGY_KWH: sensor.sensor_schema(
         unit_of_measurement="kWh",
-        accuracy_decimals=3,
+        accuracy_decimals=0,
         device_class=DEVICE_CLASS_ENERGY,
         state_class=STATE_CLASS_TOTAL_INCREASING,
     ),
@@ -104,13 +104,13 @@ NUMERIC_SENSORS = {
     ),
     CONF_ON_TIME_H: sensor.sensor_schema(
         unit_of_measurement=UNIT_HOUR,
-        accuracy_decimals=1,
+        accuracy_decimals=0,
         device_class=DEVICE_CLASS_DURATION,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
     CONF_OPERATING_TIME_H: sensor.sensor_schema(
         unit_of_measurement=UNIT_HOUR,
-        accuracy_decimals=1,
+        accuracy_decimals=0,
         device_class=DEVICE_CLASS_DURATION,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
@@ -143,7 +143,7 @@ NUMERIC_SENSORS = {
     ),
     CONF_MAX_POWER_KW: sensor.sensor_schema(
         unit_of_measurement=UNIT_KILOWATT,
-        accuracy_decimals=3,
+        accuracy_decimals=1,
         device_class=DEVICE_CLASS_POWER,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
@@ -167,7 +167,7 @@ NUMERIC_SENSORS = {
     ),
     CONF_PREVIOUS_ENERGY_KWH: sensor.sensor_schema(
         unit_of_measurement="kWh",
-        accuracy_decimals=3,
+        accuracy_decimals=0,
         device_class=DEVICE_CLASS_ENERGY,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
@@ -179,13 +179,13 @@ NUMERIC_SENSORS = {
     ),
     CONF_PREVIOUS_ON_TIME_H: sensor.sensor_schema(
         unit_of_measurement=UNIT_HOUR,
-        accuracy_decimals=1,
+        accuracy_decimals=0,
         device_class=DEVICE_CLASS_DURATION,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
     CONF_PREVIOUS_OPERATING_TIME_H: sensor.sensor_schema(
         unit_of_measurement=UNIT_HOUR,
-        accuracy_decimals=1,
+        accuracy_decimals=0,
         device_class=DEVICE_CLASS_DURATION,
         state_class=STATE_CLASS_MEASUREMENT,
     ),

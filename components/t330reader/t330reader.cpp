@@ -987,7 +987,7 @@ bool T330Reader::decode_record_(const std::vector<uint8_t> &payload,
       } else if (function_field == 1 && tariff == 1 && subunit == 0 &&
                  storage == 0) {
         this->publish_numeric_(this->max_power_kw_sensor_,
-                               static_cast<float>(scaled));
+                               static_cast<float>(scaled / 1000.0));
       }
       break;
     case Metric::FLOW_M3H:
