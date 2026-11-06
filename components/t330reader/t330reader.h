@@ -25,6 +25,10 @@ class T330Reader : public PollingComponent,
     this->uart_out_ = uart_out;
   }
 
+  void set_mbus_primary_address(uint8_t address) { 
+    this->mbus_primary_address_ = address; 
+  }
+
   void set_energy_kwh_sensor(Sensor *sensor) {
     this->energy_kwh_sensor_ = sensor;
   }
@@ -160,6 +164,8 @@ class T330Reader : public PollingComponent,
   void publish_text_(text_sensor::TextSensor *sensor, const std::string &value);
 
   uart::UARTComponent *uart_out_{nullptr};
+
+  uint8_t mbus_primary_address_{1};
 
   Sensor *energy_kwh_sensor_{nullptr};
   Sensor *volume_m3_sensor_{nullptr};
