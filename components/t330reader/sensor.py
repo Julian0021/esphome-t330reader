@@ -223,6 +223,7 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(T330Reader),
             cv.GenerateID(CONF_UART_OUT_ID): cv.use_id(uart.UARTComponent),
+            cv.Optional("mbus_primary_address", default=1): cv.positive_int,
             **{cv.Optional(key): schema for key, schema in NUMERIC_SENSORS.items()},
             **{cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()},
         }
@@ -256,6 +257,8 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
+
+    cg.add(var.set_mbus_primary_address(config["mbus_primary_address"]))
 
     uart_out = await cg.get_variable(config[CONF_UART_OUT_ID])
     cg.add(var.set_uart_out(uart_out))

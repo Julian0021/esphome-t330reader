@@ -75,6 +75,7 @@ sensor:
     uart_id: uart_meter
     uart_out_id: uart_meter
     update_interval: 60min
+    mbus_primary_address: 1
 
     energy_kwh:
       name: "Energie"

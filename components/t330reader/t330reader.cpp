@@ -52,7 +52,7 @@ static bool is_valid_long_frame_packet(const std::vector<uint8_t> &packet) {
   return checksum == packet[4 + packet[1]] && packet[5 + packet[1]] == 0x16;
 }
 
-static bool is_seq3_confirmation_packet(const std::vector<uint8_t> &packet) {
+static bool is_seq3_confirmation_packet(const std::vector<uint8_t> &packet, uint8_t address) {
   if (!is_valid_long_frame_packet(packet)) {
     return false;
   }
@@ -61,7 +61,7 @@ static bool is_seq3_confirmation_packet(const std::vector<uint8_t> &packet) {
   }
   // Strict sequence-3 confirmation:
   // 68 05 05 68 08 00 78 0F 00 8F 16
-  return packet[4] == 0x08 && packet[5] == 0x00 && packet[6] == 0x78 &&
+  return packet[4] == 0x08 && packet[5] == address && packet[6] == 0x78 &&
          packet[7] == 0x0F && packet[8] == 0x00;
 }
 
@@ -435,7 +435,7 @@ bool T330Reader::perform_handshake_(std::string &version_string) {
     if (!this->read_packet_(packet, COMMAND_TIMEOUT_MS)) {
       continue;
     }
-    if (is_seq3_confirmation_packet(packet)) {
+    if (is_seq3_confirmation_packet(packet, this->mbus_primary_address_)) {
       seq3_ok = true;
       break;
     }
@@ -444,6 +444,9 @@ bool T330Reader::perform_handshake_(std::string &version_string) {
              "confirmation not met (size=%u first=0x%02X)",
              attempt + 1, static_cast<unsigned>(packet.size()),
              static_cast<unsigned>(packet.empty() ? 0 : packet[0]));
+    ESP_LOGD(TAG,
+             "Content: [0]=0x%02X [1]=0x%02X [2]=0x%02X [3]=0x%02X [4]=0x%02X [5]=0x%02X [6]=0x%02X [7]=0x%02X [8]=0x%02X [9]=0x%02X [10]=0x%02X",
+             static_cast<unsigned>(packet.empty() ? 0 : packet[0]), static_cast<unsigned>(packet.empty() ? 0 : packet[1]), static_cast<unsigned>(packet.empty() ? 0 : packet[2]), static_cast<unsigned>(packet.empty() ? 0 : packet[3]), static_cast<unsigned>(packet.empty() ? 0 : packet[4]), static_cast<unsigned>(packet.empty() ? 0 : packet[5]), static_cast<unsigned>(packet.empty() ? 0 : packet[6]), static_cast<unsigned>(packet.empty() ? 0 : packet[7]), static_cast<unsigned>(packet.empty() ? 0 : packet[8]), static_cast<unsigned>(packet.empty() ? 0 : packet[9]), static_cast<unsigned>(packet.empty() ? 0 : packet[10]));
   }
 
   if (!seq3_ok) {
